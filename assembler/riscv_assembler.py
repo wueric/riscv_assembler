@@ -102,30 +102,12 @@ R_I_TYPE_UPPER_SEVEN_BITS_ALT = '0100000'
 def generate_binary_from_instruction (instruction_text):
 
     '''
-    >>> U_type_test = 'LUI x4,0xFF'
-    >>> generate_binary_from_instruction(U_type_test)
-    '00000000000011111111001000110111'
-    >>> UJ_type_test = 'JAL x4,0xF0'
-    >>> generate_binary_from_instruction(UJ_type_test)
-    '00011110000000000000001001101111'
-    >>> S_type_test = 'SB x7,x31,0x99'
-    >>> generate_binary_from_instruction(S_type_test)
-    '00001001111100111000110010100011'
-    >>> SB_type_test = 'BEQ x7,x8,0x335'
-    >>> generate_binary_from_instruction(SB_type_test)
-    '00110010100000111000101001100011'
-    >>> I_type_test = 'SRAI x9,x8,0x4'
-    >>> generate_binary_from_instruction(I_type_test)
-    '01000000010001000101010010010011'
-    >>> I_type_test = 'SRLI x9,x8,0x4'
-    >>> generate_binary_from_instruction(I_type_test)
-    '00000000010001000101010010010011'
     >>> R_type_test = 'OR x10,x8,x31'
     >>> generate_binary_from_instruction(R_type_test)
-    '00000001111101000110010100110011'
+    ('00000001111101000110010100110011', 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
     >>> R_type_test = 'SUB x10,x8,x30'
     >>> generate_binary_from_instruction(R_type_test)
-    '01000001111001000000010100110011'
+    ('01000001111001000000010100110011', 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
     '''
     calculate_register_number_from_name = lambda x: int(x[1:])
 
@@ -138,17 +120,20 @@ def generate_binary_from_instruction (instruction_text):
         assert len(instruction_values) == 2
         
         register_name = calculate_register_number_from_name(instruction_values[0])
-        immediate_value = int(instruction_values[1], 0) # convert immediate to integer
+        immediate_value = int(instruction_values[1], 0) & 0xFFFFF000 # convert immediate to integer
         
-        # get the bottom 20 bits
-        immediate_bottom_bits = immediate_value & 0xFFFFF
+        immediate_bits = immediate_value >> 12
 
-        instruction_binary = '{0:020b}{1:05b}{2}'.format(immediate_bottom_bits,
+        instruction_binary = '{0:020b}{1:05b}{2}'.format(immediate_bits,
                                                         register_name,
                                                         OPCODES[instruction_name])
 
+
+        immediate_real_pattern = '{0:032b}'.format(immediate_value)
+
         assert len(instruction_binary) == 32
-        return instruction_binary
+        assert len(immediate_real_pattern) == 32
+        return instruction_binary, immediate_real_pattern
         
     elif instruction_type == 'UJ_TYPE':
         # unpack uj-type instruction
@@ -157,21 +142,27 @@ def generate_binary_from_instruction (instruction_text):
         register_name = calculate_register_number_from_name(instruction_values[0])
         immediate_value = int(instruction_values[1], 0) # convert immediate to integer
         # get bottom 20 bits of immediate
-        immediate_bottom_bits = immediate_value & 0xFFFFF
+        immediate_bottom_bits = immediate_value & 0x1FFFFF
         
         # pack immedate bits into binary string
         immediate_binary_string = '{0:01b}{1:010b}{2:01b}{3:08b}'.format(
-            (immediate_bottom_bits >> 19) & 0x1,
-            (immediate_bottom_bits & 0x3FF),
-            (immediate_bottom_bits >> 10) & 0x1,
-            (immediate_bottom_bits >> 11) & 0xFF)
+            (immediate_bottom_bits >> 20) & 0x1,
+            (immediate_bottom_bits >> 1) & 0x3FF,
+            (immediate_bottom_bits >> 11) & 0x1,
+            (immediate_bottom_bits >> 12) & 0xFF)
 
         instruction_binary = '{0}{1:05b}{2}'.format(immediate_binary_string,
             register_name,
             OPCODES[instruction_name])
 
+
+        sign_extension_pattern = 11 * '{0}'.format(immediate_value >> 20)
+        immediate_real_pattern = '{0}{1:021b}'.format(sign_extension_pattern, immediate_value)
+        
+
         assert len(instruction_binary) == 32
-        return instruction_binary
+        assert len(immediate_real_pattern) == 32
+        return instruction_binary, immediate_real_pattern
 
     elif instruction_type == 'SB_TYPE':
 
@@ -182,18 +173,18 @@ def generate_binary_from_instruction (instruction_text):
         rs1_name = calculate_register_number_from_name(instruction_values[0])
         rs2_name = calculate_register_number_from_name(instruction_values[1])
 
-        # get bottom 12 bits of immediate
-        immediate_value = int(instruction_values[2], 0) & 0xFFF
+        # get bottom 13 bits
+        immediate_value = int(instruction_values[2], 0) & 0x1FFF
 
         # pack upper half of immediate
         immediate_upper_bits_string = '{0:01b}{1:06b}'.format(
-            (immediate_value >> 11) & 0x1,
+            (immediate_value >> 12) & 0x1,
             (immediate_value >> 5) & 0x3F)
 
         # pack lower half of immediate
         immediate_lower_bits_string = '{0:04b}{1:01b}'.format(
             (immediate_value >> 1) & 0xF,
-            (immediate_value >> 10) & 0x1)
+            (immediate_value >> 11) & 0x1)
 
         instruction_binary = '{0}{1:05b}{2:05b}{3}{4}{5}'.format(
             immediate_upper_bits_string,
@@ -204,8 +195,13 @@ def generate_binary_from_instruction (instruction_text):
             OPCODES[instruction_name]
         )
 
+        sign_extension_pattern = 19 * '{0}'.format(immediate_value >> 12)
+        immediate_real_pattern = '{0}{1:013b}'.format(sign_extension_pattern,
+            immediate_value)
+
         assert len(instruction_binary) == 32
-        return instruction_binary
+        assert len(immediate_real_pattern) == 32
+        return instruction_binary, immediate_real_pattern
 
     elif instruction_type == 'S_TYPE':
         assert len(instruction_values) == 3
@@ -226,9 +222,14 @@ def generate_binary_from_instruction (instruction_text):
             OPCODES[instruction_name]
         )
 
+        sign_extension_pattern = 20 * '{0}'.format(immediate_value >> 11)
+        immediate_real_pattern = '{0}{1:012b}'.format(sign_extension_pattern,
+            immediate_value)
+
+        assert len(immediate_real_pattern) == 32
         assert len(instruction_binary) == 32
 
-        return instruction_binary
+        return instruction_binary, immediate_real_pattern
 
     elif instruction_type == 'I_TYPE':
         # unpack i-type instruction
@@ -266,8 +267,19 @@ def generate_binary_from_instruction (instruction_text):
             rd_name,
             OPCODES[instruction_name])
 
+
+        sign_extension_pattern = 20 * '{0}'.format(immediate_value >> 11)
+        immediate_real_pattern = '{0}{1:012b}'.format(sign_extension_pattern,
+            immediate_value)
+
+        if instruction_name == 'SLLI' or instruction_name == 'SRLI' \
+                or instruction_name == 'SRAI':
+            immediate_real_pattern = '0' * 27 + '{0:05b}'.format(immediate_value & 0x1F)
+
         assert len(instruction_binary) == 32
-        return instruction_binary
+        assert len(immediate_real_pattern) == 32
+
+        return instruction_binary, immediate_real_pattern
 
     elif instruction_type == 'R_TYPE':
         # unpack r-type instruction
@@ -289,14 +301,32 @@ def generate_binary_from_instruction (instruction_text):
         )
 
         assert len(instruction_binary) == 32
-        return instruction_binary
+        return instruction_binary, (32 * 'x')
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Convert RISC-V assembly to binary vectors')
-    parser.add_argument('asmfile', type=str, help='asm file')
+    parser.add_argument('asmfile', 
+                        type=str, 
+                        help='asm file')
+    parser.add_argument('-d', 
+                        '--debug', 
+                        action='store_true', 
+                        default=False, 
+                        help='enable printing additional stuff')
+    parser.add_argument('-i', 
+                        '--inst', 
+                        action='store_true', 
+                        default=False, 
+                        help='print instruction text')
+    parser.add_argument('-m', 
+                        '--imm',
+                        action='store_true', 
+                        default=False, 
+                        help='print immediate binary')
 
     args = parser.parse_args()
+
     
     assembly_file_path = args.asmfile
 
@@ -308,7 +338,15 @@ if __name__ == '__main__':
             assembly_lines = assembly_file.readlines()
             for line in assembly_lines:
                 line = line.strip('\n')
-                instruction_as_binary = generate_binary_from_instruction(line)
-                binary_file.write('{0}\n'.format(instruction_as_binary))
+                instruction_as_binary, immediate = generate_binary_from_instruction(line)
+
+                if args.debug:
+                    if args.inst:
+                        binary_file.write('inst: {0}\n'.format(line))
+                    if args.imm:
+                        binary_file.write('immediate: {0}\n'.format(immediate))
+                    binary_file.write('bin: {0}\n\n'.format(instruction_as_binary))
+                else:
+                    binary_file.write('{0}\n'.format(instruction_as_binary))
 
     print 'Completed'
