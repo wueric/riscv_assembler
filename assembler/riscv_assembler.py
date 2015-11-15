@@ -16,6 +16,14 @@ TYPES_TO_INSTRUCTION = {
     'R_TYPE': set(['ADD', 'SUB', 'SLL', 'SLT', 'SLTU', 'XOR', 'SRL', 'SRA', 'OR', 'AND'])
 }
 
+LOAD_INSTRUCTION_NAMES = set([
+    'LB', 'LH', 'LW', 'LBU', 'LHU'
+])
+
+STORE_INSTRUCTION_NAMES = set([
+    'SB', 'SH', 'SW'
+])
+
 INSTRUCTION_TO_TYPE = reverse_dict_with_iterable(TYPES_TO_INSTRUCTION)
 
 OPCODES = {
@@ -197,18 +205,18 @@ def generate_binary_from_instruction (instruction_text):
 
         sign_extension_pattern = 19 * '{0}'.format(immediate_value >> 12)
         immediate_real_pattern = '{0}{1:013b}'.format(sign_extension_pattern,
-            immediate_value)
+            immediate_value & (0xFFF << 1))
 
         assert len(instruction_binary) == 32
         assert len(immediate_real_pattern) == 32
         return instruction_binary, immediate_real_pattern
 
     elif instruction_type == 'S_TYPE':
-        assert len(instruction_values) == 3
-        
-        rs1_name = calculate_register_number_from_name(instruction_values[0])
-        rs2_name = calculate_register_number_from_name(instruction_values[1])
-        immediate_value = int(instruction_values[2], 0) & 0xFFF
+
+        rs2_name = calculate_register_number_from_name(instruction_values[0])
+        second_piece = instruction_values[1].split('(')
+        immediate_value = int(second_piece[0], base=0)
+        rs1_name = calculate_register_number_from_name(second_piece[1][:-1])
 
         immediate_upper_half = '{0:07b}'.format(immediate_value >> 5)
         immediate_lower_half = '{0:05b}'.format(immediate_value & 0x1F)
@@ -233,13 +241,23 @@ def generate_binary_from_instruction (instruction_text):
 
     elif instruction_type == 'I_TYPE':
         # unpack i-type instruction
+        rd_name = None
+        rs1_name = None
+        immediate_value = None
 
-        assert len(instruction_values) == 3
-        
-        rd_name = calculate_register_number_from_name(instruction_values[0])
-        rs1_name = calculate_register_number_from_name(instruction_values[1])
+        if instruction_name in LOAD_INSTRUCTION_NAMES:
+            rd_name = calculate_register_number_from_name(instruction_values[0])
+            second_piece = instruction_values[1].split('(')
+            immediate_value = int(second_piece[0], base=0)
+            rs1_name = calculate_register_number_from_name(second_piece[1][:-1])
 
-        immediate_value = int(instruction_values[2], 0) & 0xFFF
+        else:
+            assert len(instruction_values) == 3
+            
+            rd_name = calculate_register_number_from_name(instruction_values[0])
+            rs1_name = calculate_register_number_from_name(instruction_values[1])
+
+            immediate_value = int(instruction_values[2], base=0) & 0xFFF
 
 
         immediate_binary_string = ''
@@ -331,22 +349,18 @@ if __name__ == '__main__':
     assembly_file_path = args.asmfile
 
     assembly_file_root_name = assembly_file_path.split('.')[0]
-    binary_file_path = '{0}.riscv_bin'.format(assembly_file_root_name)
 
     with open(assembly_file_path, 'r') as assembly_file:
-        with open(binary_file_path, 'w') as binary_file:
-            assembly_lines = assembly_file.readlines()
-            for line in assembly_lines:
-                line = line.strip('\n')
-                instruction_as_binary, immediate = generate_binary_from_instruction(line)
+        assembly_lines = assembly_file.readlines()
+        for line in assembly_lines:
+            line = line.strip('\n')
+            instruction_as_binary, immediate = generate_binary_from_instruction(line)
 
-                if args.debug:
-                    if args.inst:
-                        binary_file.write('inst: {0}\n'.format(line))
-                    if args.imm:
-                        binary_file.write('immediate: {0}\n'.format(immediate))
-                    binary_file.write('bin: {0}\n\n'.format(instruction_as_binary))
-                else:
-                    binary_file.write('{0}\n'.format(instruction_as_binary))
-
-    print 'Completed'
+            if args.debug:
+                if args.inst:
+                    print 'inst: {0}'.format(line)
+                if args.imm:
+                    print 'immediate: {0}'.format(immediate)
+                print 'bin: {0}\n\n'.format(instruction_as_binary)
+            else:
+                print '{0}'.format(instruction_as_binary)

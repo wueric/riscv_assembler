@@ -24,7 +24,7 @@ ORI x19,x21,0x6
 ANDI x27,x26,0x1FF
 SLLI x25,x24,0x1
 SRAI x24,x23,0x55
-ADD x1,x2,x3
+ADD x1,x0,x0
 SUB x1,x2,x3
 SLL x1,x2,x3
 SLT x1,x2,x3

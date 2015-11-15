@@ -1,4 +1,4 @@
-from riscv_assembler import TYPES_TO_INSTRUCTION, INSTRUCTION_TO_TYPE, OPCODES, FUNCT_CODES, R_I_TYPE_UPPER_SEVEN_BITS_NORMAL, R_I_TYPE_UPPER_SEVEN_BITS_ALT
+from riscv_assembler import TYPES_TO_INSTRUCTION, INSTRUCTION_TO_TYPE, OPCODES, FUNCT_CODES, R_I_TYPE_UPPER_SEVEN_BITS_NORMAL, R_I_TYPE_UPPER_SEVEN_BITS_ALT, LOAD_INSTRUCTION_NAMES, STORE_INSTRUCTION_NAMES
 import argparse
 
 def generate_lookup_to_set (dictionary):
@@ -20,6 +20,10 @@ FUNCT_LOOKUP = generate_lookup_to_set(FUNCT_CODES)
 OPCODE_TO_TYPE = generate_opcode_to_type(INSTRUCTION_TO_TYPE, OPCODE_LOOKUP)
 
 def determine_instruction_name (opcode, funct):
+
+    if opcode == '0000000':
+        return 'NOOP'
+
     candidates = OPCODE_LOOKUP[opcode]
     if len(candidates) == 1:
         return list(candidates)[0]
@@ -78,6 +82,12 @@ def disassemble_from_binary (binary_vector):
     instruction_name = determine_instruction_name(opcode, funct) # could be wrong
         # for r-type instructions because ADD/SUB, or SRA/SRL
         # special case handled in R_TYPE code
+        # this case also exists for I_TYPE instructions
+
+    # if it's a known NOOP we can quit now
+    if instruction_name == 'NOOP':
+        return 'NOOP'
+
     instruction_type = OPCODE_TO_TYPE[opcode]
 
     if instruction_type == 'U_TYPE':
@@ -125,26 +135,39 @@ def disassemble_from_binary (binary_vector):
     elif instruction_type == 'I_TYPE':
         rd = get_rd(as_thirty_two_bit)
         rs1 = get_rs1(as_thirty_two_bit)
-       
+
         first_piece = '{0}'.format((as_thirty_two_bit >> 31) & 0x1) * 21
         second_piece = (as_thirty_two_bit >> 20) & 0x7FF
         i_type_immediate = int('{0}{1:011b}'.format(
             first_piece,
             second_piece), 2)
 
-        if opcode == OPCODES['SRLI'] and funct == FUNCT_CODES['SRLI']:
-            decider = '{0:07b}'.format(get_msb6(as_thirty_two_bit))
-            if decider == R_I_TYPE_UPPER_SEVEN_BITS_NORMAL:
-                instruction_name = 'SRLI'
-            elif decider == R_I_TYPE_UPPER_SEVEN_BITS_ALT:
-                instruction_name = 'SRAI'
-            else:
-                assert False, 'Could not disambiguate SRLI and SRAI, upper bits {0}'.format(decider)
+        if instruction_name in LOAD_INSTRUCTION_NAMES:
+            # load instructions have a special format in text
+            return '{0} x{1},0x{2:08x}(x{3})'.format(instruction_name,
+                    rd,
+                    i_type_immediate,
+                    rs1)
+        else:
+            # all other types of I-TYPE instructions
+            if opcode == OPCODES['SRLI'] and funct == FUNCT_CODES['SRLI']:
+                decider = '{0:07b}'.format(get_msb6(as_thirty_two_bit))
+                if decider == R_I_TYPE_UPPER_SEVEN_BITS_NORMAL:
+                    instruction_name = 'SRLI'
+                elif decider == R_I_TYPE_UPPER_SEVEN_BITS_ALT:
+                    instruction_name = 'SRAI'
+                else:
+                    assert False, 'Could not disambiguate SRLI and SRAI, upper bits {0}'.format(decider)
 
-        if instruction_name == 'SRLI' or instruction_name == 'SRAI' or instruction_name == 'SLLi':
-            i_type_immediate = i_type_immediate & 0x1F
-            
-        return '{0} x{1},x{2},0x{3:08x}'.format(instruction_name, rd, rs1, i_type_immediate)
+            if instruction_name == 'SRLI' or instruction_name == 'SRAI' or \
+                    instruction_name == 'SLLi':
+                i_type_immediate = i_type_immediate & 0x1F
+                
+            return '{0} x{1},x{2},0x{3:08x}'.format(instruction_name, 
+                    rd, 
+                    rs1, 
+                    i_type_immediate)
+
     elif instruction_type == 'S_TYPE':
         rs2 = get_rs2(as_thirty_two_bit)
         rs1 = get_rs1(as_thirty_two_bit)
@@ -161,10 +184,10 @@ def disassemble_from_binary (binary_vector):
             fourth_piece
         ), 2)
 
-        return '{0} x{1},x{2},0x{3:08x}'.format(instruction_name,
-            rs1,
-            rs2,
-            s_type_immediate)
+        return '{0} x{1},0x{2:08x}(x{3})'.format(instruction_name,
+                rs2,
+                s_type_immediate,
+                rs1)
 
     elif instruction_type == 'R_TYPE':
         rd = get_rd(as_thirty_two_bit)
@@ -199,13 +222,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     binary_file_path = args.binfile
-    disassemble_file_path = '{0}.disasm_riscv'.format(binary_file_path.split('.')[0])
 
     with open(binary_file_path, 'r') as binary_file:
-        with open(disassemble_file_path, 'w') as disassemble_file:
-            binary_lines = binary_file.readlines()
-            for line in binary_lines:
-                line = line.strip('\n')
-                disassembled_instruction = disassemble_from_binary(line)
-                disassemble_file.write('{0}\n'.format(disassembled_instruction))
-    print 'Completed'
+        binary_lines = binary_file.readlines()
+        for line in binary_lines:
+            line = line.strip('\n')
+            disassembled_instruction = disassemble_from_binary(line)
+            print '{0}'.format(disassembled_instruction)
